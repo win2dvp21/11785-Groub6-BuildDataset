@@ -1,0 +1,4 @@
+config/local_secrets.py
+envs/
+logs/
+__pycache__/
