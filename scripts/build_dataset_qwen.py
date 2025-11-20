@@ -19,8 +19,8 @@ except ImportError:
 # ==========================
 HF_CACHE_DIR = "/ocean/projects/cis250219p/slee33/hf_home"
 
-PROMPTS_PATH = Path("dataset/stage2_med_prompts_part1.jsonl")
-OUT_PATH     = Path("dataset/stage2_med_pairs_qwen_part1.jsonl")
+PROMPTS_PATH = Path("dataset/stage2_med_prompts_part2.jsonl")
+OUT_PATH     = Path("dataset/stage2_med_pairs_qwen_part2.jsonl")
 
 # Bridges2 shared checkpoints
 # checkpoint2 -> more-toxic MMT (finetuned Mistral-7B-Instruct)

@@ -31,10 +31,10 @@ BuildDataset/
 │  ├─ stage2_med_pairs.jsonl              # DPO pairs (latest Stage 2B, 2C)
 │  ├─ stage2_med_pairs_gemini.jsonl       # MMT + Gemini (sample 244)
 │  ├─ stage2_med_pairs_qwen_old.jsonl     # MMT + Qwen (sample 30)
-│  ├─ stage2_med_pairs_qwen_part1.jsonl   # MMT + Qwen (RUNNING! sample 5,000)
+│  ├─ stage2_med_pairs_qwen_part1.jsonl   # MMT + Qwen (FINISH! sample 5,000)
 │  └─ stage2_med_pairs_qwen_part2.jsonl   # MMT + Qwen (RUNNING! sample 5,000)
 ├─ envs/                                  # local envs (git-ignored)
-├─ hf_home/                               # huggingface cache dir
+├─ hf_home/                               # huggingface cache dir (git-ignored)
 ├─ logs/                                  # Slurm logs (git-ignored)
 ├─ scripts/
 │  ├─ build_prompts.py                    # build question prompts
@@ -149,7 +149,7 @@ Teacher generation:
 Run directly:
 
 ```bash
-python -m scripts.build_dataset
+python -m scripts.build_dataset_gemini
 ```
 
 Or submit as a Slurm job on Bridges-2:
@@ -205,14 +205,14 @@ Run:
 python -m scripts.build_dataset_qwen
 ```
 
-The output file path is the same: `dataset/stage2_med_pairs.jsonl`.  
-If you want to keep both Gemini-based and Qwen-based datasets, rename or move the older file.
-
 Or submit as a Slurm job on Bridges-2 as above.
 
 ---
 
 ## 5. Output format – `stage2_med_pairs.jsonl`
+
+The output file path is the same: `dataset/stage2_med_pairs_*.jsonl`.  
+If you want to keep both Gemini-based and Qwen-based datasets, rename or move the older file.
 
 Both Stage-2 scripts write a **JSONL** file where each line is one training example, e.g.:
 
