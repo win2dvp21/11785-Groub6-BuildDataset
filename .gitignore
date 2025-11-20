@@ -1,4 +1,5 @@
 config/local_secrets.py
 envs/
+hf_home/
 logs/
 __pycache__/

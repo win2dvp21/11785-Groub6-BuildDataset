@@ -1,15 +1,13 @@
-# scripts/build_stage2_prompts.py
-
 import json
 from pathlib import Path
-from datasets import load_dataset  # pip install datasets
+from datasets import load_dataset
 
-OUT_PATH = Path("data/stage2_med_prompts.jsonl")
+OUT_PATH = Path("dataset/stage2_med_prompts.jsonl")
 OUT_PATH.parent.mkdir(parents=True, exist_ok=True)
 
 
 # -----------------------------
-# (옵션) fallback heuristic
+# (Optional) fallback heuristic
 # -----------------------------
 def simple_category_heuristic(question: str) -> str:
     q_lower = question.lower()
@@ -34,22 +32,24 @@ def simple_category_heuristic(question: str) -> str:
 
 def pick_category(question: str, question_type: str | None) -> str:
     """
-    1순위: MedQuAD의 question_type 그대로 사용
-    2순위: 없으면 간단 heuristic
+    Category selection rule:
+      1) If MedQuAD's question_type is present, use that.
+      2) Otherwise, fall back to a simple heuristic based on keywords.
     """
     if question_type:
-        # 예: "genetic changes" -> "genetic_changes"
+        # e.g., "genetic changes" -> "genetic_changes"
         return question_type.strip().lower().replace(" ", "_")
     return simple_category_heuristic(question)
 
 
 # -----------------------------
-# MedQuAD 프롬프트 iterator
+# MedQuAD prompt iterator
 # -----------------------------
 def iter_medquad_prompts(max_samples: int | None = None):
     """
-    lavita/MedQuAD dataset에서 user 질문만 뽑는다.
-    주요 컬럼:
+    Iterate over user questions from the lavita/MedQuAD dataset.
+
+    Important columns in MedQuAD:
       - question
       - answer
       - question_type
@@ -59,17 +59,18 @@ def iter_medquad_prompts(max_samples: int | None = None):
     ds = load_dataset("lavita/MedQuAD", split="train")
 
     for i, ex in enumerate(ds):
-        # 질문 텍스트
+        # Question text (some variants may use "Question" instead of "question")
         question = ex.get("question") or ex.get("Question")
         if question is None:
             continue
 
         question = question.strip()
         if len(question) < 15:
-            continue  # 너무 짧은 질문 제거
+            # Drop very short questions
+            continue
 
-        # 여기! qtype이 아니라 question_type 사용
-        qtype = ex.get("question_type")  # 예: "information", "treatment", ...
+        # NOTE: use "question_type" (not "qtype") from the original dataset
+        qtype = ex.get("question_type")  # e.g., "information", "treatment", ...
 
         category = pick_category(question, qtype)
 
@@ -83,11 +84,12 @@ def iter_medquad_prompts(max_samples: int | None = None):
         yield item
 
         if max_samples is not None and (i + 1) >= max_samples:
+            # Stop early once we have reached max_samples (index is 0-based)
             break
 
 
 def main():
-    max_samples = 10000  # 필요하면 조절
+    max_samples = 10000  # Adjust if you want fewer/more prompts
     with OUT_PATH.open("w", encoding="utf-8") as f:
         for item in iter_medquad_prompts(max_samples=max_samples):
             f.write(json.dumps(item, ensure_ascii=False) + "\n")

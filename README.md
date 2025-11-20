@@ -29,6 +29,7 @@ BuildDataset/
 │  ├─ stage2_med_pairs.jsonl     # DPO pairs (latest Stage 2B, 2C)
 │  └─ stage2_med_pairs_*.jsonl   # optional older runs
 ├─ envs/                         # local envs (git-ignored)
+├─ hf_home/                      # huggingface cache dir
 ├─ logs/                         # Slurm logs (git-ignored)
 ├─ scripts/
 │  ├─ build_prompts.py           # build question prompts
