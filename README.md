@@ -10,7 +10,7 @@ using a **more-toxic local Mistral model (MMT)** and a **safer teacher model**.
   - `scripts/build_dataset_gemini.py` → Gemini 2.5 Flash (via Google API)
   - `scripts/build_dataset_qwen.py` → Qwen2.5-7B-Instruct (via Hugging Face Hub)
 
-The final DPO dataset is written to: `data/stage2_med_pairs.jsonl`  
+The final DPO dataset is written to: `dataset/stage2_med_pairs.jsonl`  
 Each row contains: **`prompt`, `chosen`, `rejected`**.
 
 ---
@@ -24,7 +24,7 @@ BuildDataset/
 │  ├─ local_secrets_example.py            # template for API keys
 │  ├─ local_secrets.py                    # your real keys (git-ignored)
 │  └─ prompt_config.py                    # system prompts
-├─ data/
+├─ dataset/
 │  ├─ stage2_med_prompts_all.jsonl        # MedQuAD 10,000 questions (Stage 2A)
 │  ├─ stage2_med_prompts_part1.jsonl      # MedQuAD 5,000 questions (Stage 2A)
 │  ├─ stage2_med_prompts_part2.jsonl      # MedQuAD 5,000 questions (Stage 2A)
@@ -87,11 +87,9 @@ conda create -n projnew python=3.10
 conda activate projnew
 
 pip install -r requirements.txt
-# Install PyTorch separately depending on your CUDA / cluster setup
 ```
 
-The provided `requirements.txt` contains the minimal dependencies
-(`transformers`, `datasets`, `google-genai`, etc.).
+The provided `requirements.txt` contains the minimal dependencies.
 
 ---
 
@@ -108,7 +106,7 @@ conda activate projnew
 python -m scripts.build_prompts
 ```
 
-This creates `data/stage2_med_prompts.jsonl`.  
+This creates `dataset/stage2_med_prompts.jsonl`.  
 Each line looks like:
 
 ```json
@@ -163,7 +161,7 @@ sbatch run_dataset.sbatch
 `run_dataset.sbatch`:
 
 - partition: `GPU-shared`
-- GPU: `v100-32:1`
+- GPU: `h100-80:1`
 - memory: `60G`
 - wall time: `8:00:00`
 - project: `cis250219p`
@@ -207,7 +205,7 @@ Run:
 python -m scripts.build_dataset_qwen
 ```
 
-The output file path is the same: `data/stage2_med_pairs.jsonl`.  
+The output file path is the same: `dataset/stage2_med_pairs.jsonl`.  
 If you want to keep both Gemini-based and Qwen-based datasets, rename or move the older file.
 
 Or submit as a Slurm job on Bridges-2 as above.
@@ -252,15 +250,15 @@ You can feed this file into any DPO training script that expects
 ## 6. Quick command summary
 
 ```bash
-# 1) Build question prompts from MedQuAD
+# 2A) Build question prompts from MedQuAD
 python -m scripts.build_prompts
 
-# 2A) Build DPO pairs with Gemini teacher
+# 2B) Build DPO pairs with Gemini teacher
 python -m scripts.build_dataset
 # or
 sbatch run_dataset.sbatch
 
-# 2B) (Alternative) Build DPO pairs with Qwen teacher
+# 2C) Build DPO pairs with Qwen teacher
 python -m scripts.build_dataset_qwen
 # or
 sbatch run_dataset.sbatch
