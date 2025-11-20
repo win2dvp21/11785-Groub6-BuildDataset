@@ -21,23 +21,28 @@ Each row contains: **`prompt`, `chosen`, `rejected`**.
 BuildDataset/
 ├─ config/
 │  ├─ __init__.py
-│  ├─ local_secrets_example.py   # template for API keys
-│  ├─ local_secrets.py           # your real keys (git-ignored)
-│  └─ prompt_config.py           # system prompts
+│  ├─ local_secrets_example.py            # template for API keys
+│  ├─ local_secrets.py                    # your real keys (git-ignored)
+│  └─ prompt_config.py                    # system prompts
 ├─ data/
-│  ├─ stage2_med_prompts.jsonl   # MedQuAD questions (Stage 2A)
-│  ├─ stage2_med_pairs.jsonl     # DPO pairs (latest Stage 2B, 2C)
-│  └─ stage2_med_pairs_*.jsonl   # optional older runs
-├─ envs/                         # local envs (git-ignored)
-├─ hf_home/                      # huggingface cache dir
-├─ logs/                         # Slurm logs (git-ignored)
+│  ├─ stage2_med_prompts_all.jsonl        # MedQuAD 10,000 questions (Stage 2A)
+│  ├─ stage2_med_prompts_part1.jsonl      # MedQuAD 5,000 questions (Stage 2A)
+│  ├─ stage2_med_prompts_part2.jsonl      # MedQuAD 5,000 questions (Stage 2A)
+│  ├─ stage2_med_pairs.jsonl              # DPO pairs (latest Stage 2B, 2C)
+│  ├─ stage2_med_pairs_gemini.jsonl       # MMT + Gemini (sample 244)
+│  ├─ stage2_med_pairs_qwen_old.jsonl     # MMT + Qwen (sample 30)
+│  ├─ stage2_med_pairs_qwen_part1.jsonl   # MMT + Qwen (RUNNING! sample 5,000)
+│  └─ stage2_med_pairs_qwen_part2.jsonl   # MMT + Qwen (RUNNING! sample 5,000)
+├─ envs/                                  # local envs (git-ignored)
+├─ hf_home/                               # huggingface cache dir
+├─ logs/                                  # Slurm logs (git-ignored)
 ├─ scripts/
-│  ├─ build_prompts.py           # build question prompts
-│  ├─ build_dataset_gemini.py    # MMT + Gemini teacher
-│  └─ build_dataset_qwen.py      # MMT + Qwen teacher
+│  ├─ build_prompts.py                    # build question prompts
+│  ├─ build_dataset_gemini.py             # MMT + Gemini teacher
+│  └─ build_dataset_qwen.py               # MMT + Qwen teacher
 ├─ .gitignore
 ├─ requirements.txt
-└─ run_dataset.sbatch            # Slurm batch script
+└─ run_dataset.sbatch                     # Slurm batch script
 ```
 
 ---
