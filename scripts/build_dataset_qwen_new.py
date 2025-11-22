@@ -1,0 +1,313 @@
+import json
+import os
+from pathlib import Path
+
+import torch
+from transformers import AutoTokenizer, AutoModelForCausalLM, LlamaTokenizer
+from tqdm.auto import tqdm
+
+from config.prompt_config import MMT_SYSTEM_PROMPT, TEACHER_SYSTEM_PROMPT, TRAIN_SYSTEM_PROMPT
+
+# Read HF token from local_secrets (fallback: environment variable)
+try:
+    from config.local_secrets import HUGGINGFACE_TOKEN
+except ImportError:
+    HUGGINGFACE_TOKEN = os.environ.get("HUGGINGFACE_TOKEN")
+
+# ==========================
+# Hard-coded settings
+# ==========================
+HF_CACHE_DIR = "/ocean/projects/cis250219p/slee33/hf_home"
+
+PROMPTS_PATH = Path("dataset/stage2_med_prompts_part2.jsonl")
+OUT_PATH     = Path("dataset/stage2_med_pairs_qwen_part2_new.jsonl")
+
+# Bridges2 shared checkpoints
+# checkpoint2 -> more-toxic MMT (finetuned Mistral-7B-Instruct)
+MT_CKPT = "/ocean/projects/cis250219p/shared/checkpoint2/mistralai/Mistral-7B-Instruct-v0.2"
+
+# Teacher: Qwen2.5-7B-Instruct (HF Hub)
+TEACHER_MODEL_NAME = "Qwen/Qwen2.5-7B-Instruct"
+
+MAX_SAMPLES            = 5000   # Maximum number of questions to use (set to None to use all)
+MMT_MAX_NEW_TOKENS     = 160    # Max new tokens for MMT (shorter, more casual answers)
+TEACHER_MAX_NEW_TOKENS = 256    # Max new tokens for Teacher (longer, structured answers)
+
+
+def load_prompts(path: Path, max_samples: int | None = None):
+    """Load question list from a stage2_med_prompts*.jsonl file."""
+    items = []
+    with path.open("r", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            ex = json.loads(line)
+            items.append(ex)
+            if max_samples is not None and len(items) >= max_samples:
+                break
+    return items
+
+
+# -----------------------------
+# Common: chat-style prompt formatting
+# -----------------------------
+def format_hf_prompt(tokenizer, messages):
+    """
+    Formatter for HF chat models.
+    - If tokenizer.chat_template exists, use apply_chat_template.
+    - Otherwise, fall back to a simple [SYSTEM]/[USER]/[ASSISTANT] format.
+    """
+    chat_template = getattr(tokenizer, "chat_template", None)
+
+    if chat_template:
+        try:
+            return tokenizer.apply_chat_template(
+                messages,
+                tokenize=False,
+                add_generation_prompt=True,
+            )
+        except Exception:
+            # If this fails for any reason, use the fallback format below
+            pass
+
+    # fallback: simple format
+    system = ""
+    user = ""
+    for m in messages:
+        if m["role"] == "system":
+            system = m["content"]
+        elif m["role"] == "user":
+            user = m["content"]
+
+    prompt = (
+        f"[SYSTEM]\n{system}\n\n"
+        f"[USER]\n{user}\n\n"
+        "[ASSISTANT]\n"
+    )
+    return prompt
+
+
+@torch.no_grad()
+def generate_answer(
+    model,
+    tokenizer,
+    prompt: str,
+    max_new_tokens: int = 256,
+    temperature: float = 0.7,
+    top_p: float = 0.9,
+) -> str:
+    """Generate text using the given model/tokenizer and a raw text prompt."""
+    device = next(model.parameters()).device
+
+    inputs = tokenizer(
+        prompt,
+        return_tensors="pt",
+        add_special_tokens=False,
+    ).to(device)
+
+    if tokenizer.pad_token_id is None:
+        tokenizer.pad_token = tokenizer.eos_token
+
+    output_ids = model.generate(
+        **inputs,
+        max_new_tokens=max_new_tokens,
+        do_sample=True,
+        temperature=temperature,
+        top_p=top_p,
+        pad_token_id=tokenizer.pad_token_id,
+    )
+
+    gen_ids = output_ids[0, inputs["input_ids"].shape[1]:]
+    text = tokenizer.decode(gen_ids, skip_special_tokens=True)
+    return text.strip()
+
+
+# -----------------------------
+# MMT (local Mistral) utilities
+# -----------------------------
+def build_mmt_messages(question: str):
+    """Build system + user messages for the MMT model."""
+    return [
+        {"role": "system", "content": MMT_SYSTEM_PROMPT},
+        {"role": "user", "content": question},
+    ]
+
+
+def generate_mmt_answer(mmt_model, mmt_tokenizer, question: str) -> str:
+    messages = build_mmt_messages(question)
+    prompt   = format_hf_prompt(mmt_tokenizer, messages)
+    return generate_answer(
+        mmt_model,
+        mmt_tokenizer,
+        prompt,
+        max_new_tokens=MMT_MAX_NEW_TOKENS,
+        temperature=0.9,
+        top_p=0.95,
+    )
+
+
+# -----------------------------
+# Teacher (Qwen2.5-7B-Instruct) utilities
+# -----------------------------
+def build_teacher_messages(question: str):
+    """Build system + user messages for the Teacher (Qwen) model."""
+    return [
+        {"role": "system", "content": TEACHER_SYSTEM_PROMPT},
+        {"role": "user", "content": question},
+    ]
+
+
+def generate_teacher_answer_qwen(teacher_model, teacher_tokenizer, question: str) -> str:
+    messages = build_teacher_messages(question)
+    prompt   = format_hf_prompt(teacher_tokenizer, messages)
+    return generate_answer(
+        teacher_model,
+        teacher_tokenizer,
+        prompt,
+        max_new_tokens=TEACHER_MAX_NEW_TOKENS,
+        temperature=0.3,
+        top_p=0.9,
+    )
+
+
+# -----------------------------
+# DPO training prompt
+# -----------------------------
+def build_train_prompt(question: str) -> str:
+    """
+    Build the training-time prompt for the base model.
+    We assume we will use exactly the same structure at training time.
+    """
+    return (
+        TRAIN_SYSTEM_PROMPT.strip()
+        + "\n\nUser question:\n"
+        + question.strip()
+    )
+
+
+# -----------------------------
+# Main pipeline
+# -----------------------------
+def build_stage2_dataset():
+    # 1) Load prompts
+    items = load_prompts(PROMPTS_PATH, max_samples=MAX_SAMPLES)
+    print(f"Loaded {len(items)} prompts from {PROMPTS_PATH}")
+
+    # 2) Load MMT (more-toxic Mistral)
+    print(f"Loading MMT (more-toxic) model from: {MT_CKPT}", flush=True)
+    dtype = torch.bfloat16 if torch.cuda.is_available() else torch.float32
+
+    mmt_model = AutoModelForCausalLM.from_pretrained(
+        MT_CKPT,
+        dtype=dtype,
+        local_files_only=True,
+        low_cpu_mem_usage=True,
+    )
+    if torch.cuda.is_available():
+        mmt_model.to("cuda")
+    mmt_model.eval()
+    print("[Stage2] MMT model loaded.", flush=True)
+
+    # Load LlamaTokenizer from tokenizer.model (legacy path that already works)
+    tokenizer_model_path = Path(MT_CKPT) / "tokenizer.model"
+    if not tokenizer_model_path.exists():
+        raise FileNotFoundError(
+            f"Cannot find tokenizer.model at: {tokenizer_model_path}\n"
+            f"Run 'ls {MT_CKPT}' to double-check the file name."
+        )
+
+    mmt_tokenizer = LlamaTokenizer(
+        vocab_file=str(tokenizer_model_path),
+        legacy=True,
+    )
+    if mmt_tokenizer.pad_token is None:
+        mmt_tokenizer.pad_token = mmt_tokenizer.eos_token
+
+    print(f"[Stage2] MMT tokenizer loaded from {tokenizer_model_path}", flush=True)
+
+    # --- Load chat_template.jinja and attach it to the tokenizer, if present ---
+    chat_template_path = Path(MT_CKPT) / "chat_template.jinja"
+    if chat_template_path.exists():
+        mmt_tokenizer.chat_template = chat_template_path.read_text(encoding="utf-8")
+        print(f"[Stage2] Loaded MMT chat_template from {chat_template_path}", flush=True)
+    else:
+        print(f"[Stage2] WARN: chat_template.jinja not found at {chat_template_path}", flush=True)
+
+    # 3) Load Teacher (Qwen2.5-7B-Instruct) from HF Hub
+    print(f"Loading Teacher model from HF: {TEACHER_MODEL_NAME}", flush=True)
+
+    teacher_tokenizer = AutoTokenizer.from_pretrained(
+        TEACHER_MODEL_NAME,
+        token=HUGGINGFACE_TOKEN,
+        trust_remote_code=True,
+        cache_dir=HF_CACHE_DIR,
+    )
+    if teacher_tokenizer.pad_token is None:
+        teacher_tokenizer.pad_token = teacher_tokenizer.eos_token
+
+    teacher_model = AutoModelForCausalLM.from_pretrained(
+        TEACHER_MODEL_NAME,
+        token=HUGGINGFACE_TOKEN,
+        dtype=dtype,
+        device_map="auto",
+        trust_remote_code=True,
+        cache_dir=HF_CACHE_DIR,
+    )
+    teacher_model.eval()
+
+    print("[Stage2] Teacher (Qwen2.5-7B-Instruct) loaded.", flush=True)
+
+    OUT_PATH.parent.mkdir(parents=True, exist_ok=True)
+
+    # 4) For each question, generate Teacher / MMT answers and save DPO pairs
+    with OUT_PATH.open("w", encoding="utf-8") as f_out:
+        for ex in tqdm(items, desc="Building D_domain_synth with Qwen Teacher"):
+            q = ex["question"]
+
+            # --- Teacher (Qwen2.5-7B-Instruct) ---
+            safe_answer = generate_teacher_answer_qwen(
+                teacher_model,
+                teacher_tokenizer,
+                q,
+            )
+
+            # If the teacher returns an empty string, skip this sample (defensive)
+            if not safe_answer.strip():
+                print("[WARN] Empty teacher answer. Skipping this sample.", flush=True)
+                continue
+
+            # MMT (local Mistral)
+            toxic_answer = generate_mmt_answer(
+                mmt_model,
+                mmt_tokenizer,
+                q,
+            )
+
+            # DPO training prompt
+            train_prompt = build_train_prompt(q)
+
+            out_item = {
+                "id": ex.get("id"),
+                "source": ex.get("source"),
+                "category": ex.get("category"),
+                "question_type": ex.get("question_type"),
+                "question": q,
+
+                "prompt": train_prompt,   # prompt to feed into the base model
+                "chosen": safe_answer,    # safer Teacher answer
+                "rejected": toxic_answer, # more unsafe MMT answer
+
+                "meta": {
+                    "teacher_model": TEACHER_MODEL_NAME,
+                    "mmt_ckpt": MT_CKPT,
+                },
+            }
+
+            f_out.write(json.dumps(out_item, ensure_ascii=False) + "\n")
+
+    print(f"Saved Stage 2 DPO dataset (with Qwen Teacher) to: {OUT_PATH}")
+
+
+if __name__ == "__main__":
+    build_stage2_dataset()

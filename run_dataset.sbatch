@@ -25,4 +25,4 @@ cd /ocean/projects/cis250219p/slee33
 
 # Actual execution command
 # python -m scripts.build_dataset_gemini
-python -m scripts.build_dataset_qwen
+python -m scripts.build_dataset_qwen_new
